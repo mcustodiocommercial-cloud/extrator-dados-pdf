@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Extrator de Sócios — Contrato Social</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg: #F6F5F2;
+    --paper: #FFFFFF;
+    --ink: #1E2530;
+    --ink-soft: #5A6472;
+    --line: #DFE0DB;
+    --navy: #2A4D69;
+    --navy-dark: #1B3247;
+    --gold: #B8912B;
+    --gold-soft: #F3E9CE;
+    --danger: #A13F3F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  header{
+    background: var(--navy-dark);
+    color: #fff;
+    padding: 22px 32px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    border-bottom: 3px solid var(--gold);
+  }
+  header .selo{
+    width:36px; height:36px; border-radius:50%;
+    border:2px solid var(--gold);
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:14px; color: var(--gold);
+    flex-shrink:0;
+  }
+  header h1{
+    font-size:18px;
+    margin:0;
+    font-weight:600;
+    letter-spacing:.2px;
+  }
+  header p{
+    margin:2px 0 0;
+    font-size:12.5px;
+    color:#C7D2DC;
+  }
+  main{
+    max-width:1200px;
+    margin:0 auto;
+    padding: 28px 24px 60px;
+    display:grid;
+    grid-template-columns: 1fr;
+    gap:22px;
+  }
+  @media(min-width:960px){
+    main{ grid-template-columns: 380px 1fr; align-items:start; }
+  }
+  .panel{
+    background: var(--paper);
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow:hidden;
+  }
+  .panel-header{
+    padding:14px 18px;
+    border-bottom:1px solid var(--line);
+    font-size:13px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.6px;
+    color: var(--ink-soft);
+    background:#FBFAF8;
+  }
+  /* Upload area */
+  #dropzone{
+    margin:18px;
+    border:2px dashed var(--line);
+    border-radius:8px;
+    padding:34px 18px;
+    text-align:center;
+    cursor:pointer;
+    transition: border-color .15s, background .15s;
+  }
+  #dropzone:hover, #dropzone.drag{
+    border-color: var(--navy);
+    background: #F1F5F8;
+  }
+  #dropzone svg{ width:34px; height:34px; color:var(--ink-soft); margin-bottom:8px;}
+  #dropzone .primary{ font-size:14.5px; font-weight:600; color:var(--ink); }
+  #dropzone .secondary{ font-size:12px; color:var(--ink-soft); margin-top:4px; }
+  #fileInput{ display:none; }
+
+  #fileMeta{
+    margin: 0 18px 18px;
+    font-size:12.5px;
+    color: var(--ink-soft);
+    display:none;
+  }
+  #fileMeta.show{ display:block; }
+  #fileMeta strong{ color: var(--ink); }
+
+  #status{
+    margin: 0 18px 14px;
+    font-size:13px;
+    display:none;
+    padding:10px 12px;
+    border-radius:6px;
+  }
+  #status.show{ display:block; }
+  #status.info{ background:#EEF3F7; color:var(--navy-dark); }
+  #status.error{ background:#F7EAEA; color:var(--danger); }
+
+  /* PDF preview */
+  #pdfViewer{
+    padding: 0 18px 18px;
+    max-height:600px;
+    overflow:auto;
+  }
+  #pdfViewer canvas{
+    width:100%;
+    display:block;
+    border:1px solid var(--line);
+    border-radius:4px;
+    margin-bottom:10px;
+  }
+  .page-nav{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:12px;
+    padding: 0 18px 16px;
+    font-size:12.5px;
+    color: var(--ink-soft);
+  }
+  .page-nav button{
+    border:1px solid var(--line);
+    background:#fff;
+    border-radius:5px;
+    padding:5px 10px;
+    cursor:pointer;
+    font-size:12.5px;
+  }
+  .page-nav button:disabled{ opacity:.4; cursor:default; }
+
+  /* Results */
+  #results{ padding:20px; }
+  .empty-state{
+    text-align:center;
+    padding:60px 20px;
+    color: var(--ink-soft);
+  }
+  .empty-state svg{ width:40px;height:40px; margin-bottom:10px; opacity:.5; }
+  .socio-card{
+    background:#FDFCFA;
+    border:1px solid var(--line);
+    border-left:4px solid var(--navy);
+    border-radius:8px;
+    padding:18px 20px;
+    margin-bottom:16px;
+  }
+  .socio-card h3{
+    margin:0 0 12px;
+    font-size:16px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .badge-pct{
+    background: var(--gold-soft);
+    color: #7A5E14;
+    border:1px solid #E4D19C;
+    font-size:12px;
+    font-weight:700;
+    padding:3px 9px;
+    border-radius:20px;
+  }
+  .field-grid{
+    display:grid;
+    grid-template-columns: 140px 1fr;
+    row-gap:8px;
+    column-gap:12px;
+    font-size:13.5px;
+  }
+  .field-grid dt{
+    color: var(--ink-soft);
+    font-weight:600;
+  }
+  .field-grid dd{
+    margin:0;
+  }
+  .field-grid dd.missing{
+    color:#B08A00;
+    font-style:italic;
+  }
+  .mono{ font-variant-numeric: tabular-nums; }
+
+  details.raw{
+    margin-top:22px;
+    border-top:1px solid var(--line);
+    padding-top:14px;
+  }
+  details.raw summary{
+    cursor:pointer;
+    font-size:12.5px;
+    color: var(--ink-soft);
+    font-weight:600;
+  }
+  details.raw pre{
+    white-space:pre-wrap;
+    font-size:11.5px;
+    line-height:1.5;
+    background:#FBFAF8;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:14px;
+    max-height:260px;
+    overflow:auto;
+    margin-top:10px;
+    color:#444;
+  }
+  .disclaimer{
+    font-size:11.5px;
+    color: var(--ink-soft);
+    margin-top:18px;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="selo">JC</div>
+  <div>
+    <h1>Extrator de Sócios — Contrato Social</h1>
+    <p>Leitura automática de nome, endereço e participação societária a partir do PDF</p>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-header">Documento</div>
+    <div id="dropzone">
+      <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0-3 3m3-3 3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" /></svg>
+      <div class="primary">Clique ou arraste o PDF do contrato social</div>
+      <div class="secondary">O arquivo é lido só no seu navegador — nada é enviado a servidor nenhum</div>
+    </div>
+    <input type="file" id="fileInput" accept="application/pdf">
+    <div id="fileMeta"></div>
+    <div id="status"></div>
+
+    <div id="pdfViewer"></div>
+    <div class="page-nav" id="pageNav" style="display:none;">
+      <button id="prevPage">‹ anterior</button>
+      <span id="pageInfo">página 1 / 1</span>
+      <button id="nextPage">próxima ›</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">Sócios identificados</div>
+    <div id="results">
+      <div class="empty-state">
+        <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
+        <div>Envie um PDF para ver os sócios extraídos aqui.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileMeta = document.getElementById('fileMeta');
+const statusEl = document.getElementById('status');
+const pdfViewer = document.getElementById('pdfViewer');
+const pageNav = document.getElementById('pageNav');
+const pageInfo = document.getElementById('pageInfo');
+const prevBtn = document.getElementById('prevPage');
+const nextBtn = document.getElementById('nextPage');
+const resultsEl = document.getElementById('results');
+
+let pdfDoc = null;
+let currentPage = 1;
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function showStatus(msg, type){
+  statusEl.textContent = msg;
+  statusEl.className = 'show ' + (type || 'info');
+}
+function hideStatus(){
+  statusEl.className = '';
+}
+
+async function handleFile(file){
+  if (file.type !== 'application/pdf'){
+    showStatus('Esse arquivo não é um PDF. Envie o PDF do contrato social.', 'error');
+    return;
+  }
+  fileMeta.innerHTML = `<strong>${file.name}</strong> · ${(file.size/1024/1024).toFixed(2)} MB`;
+  fileMeta.classList.add('show');
+  showStatus('Lendo o documento…', 'info');
+  resultsEl.innerHTML = '<div class="empty-state">Analisando o PDF…</div>';
+
+  try{
+    const buffer = await file.arrayBuffer();
+    pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
+    currentPage = 1;
+    pageNav.style.display = 'flex';
+    await renderPage(currentPage);
+
+    const fullText = await extractFullText(pdfDoc);
+    const socios = parseSocios(fullText);
+    renderResults(socios, fullText);
+    hideStatus();
+  }catch(err){
+    console.error(err);
+    showStatus('Não consegui ler esse PDF. Confirme se o arquivo não está corrompido e tente de novo.', 'error');
+    resultsEl.innerHTML = '<div class="empty-state">Não foi possível processar o documento.</div>';
+  }
+}
+
+async function renderPage(num){
+  const page = await pdfDoc.getPage(num);
+  const viewport = page.getViewport({ scale: 1.4 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  pdfViewer.innerHTML = '';
+  pdfViewer.appendChild(canvas);
+  pageInfo.textContent = `página ${num} / ${pdfDoc.numPages}`;
+  prevBtn.disabled = num <= 1;
+  nextBtn.disabled = num >= pdfDoc.numPages;
+}
+prevBtn.addEventListener('click', () => { if(currentPage>1){ currentPage--; renderPage(currentPage);} });
+nextBtn.addEventListener('click', () => { if(pdfDoc && currentPage<pdfDoc.numPages){ currentPage++; renderPage(currentPage);} });
+
+async function extractFullText(doc){
+  let text = '';
+  for (let i=1; i<=doc.numPages; i++){
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(it => it.str).join(' ');
+    text += pageText + '\n';
+  }
+  return text;
+}
+
+// ---------- Parsing ----------
+function normalize(text){
+  return text.replace(/\u00A0/g,' ').replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,' \n ');
+}
+
+function parseSocios(rawText){
+  const text = normalize(rawText).replace(/\n/g,' ');
+  const socios = new Map(); // nome normalizado -> dados
+
+  // 1) Encontrar blocos "NOME ... nacionalidade: brasileir[o|a] ... CEP xxxx"
+  // Importante: o nome fica em CAIXA ALTA no documento, então NÃO usamos a flag
+  // de "ignorar maiúsculas/minúsculas" aqui — senão a captura avança pelo texto
+  // normal (minúsculo) do contrato e pega nome errado.
+  const blockRegex = /([A-ZÀ-Ü][A-ZÀ-Ü.\s]{4,70}?),?\s*[Nn]acionalidade:?\s*[Bb]rasileir[ao][\s\S]{0,700}?[Cc][Ee][Pp]\s*[:\-]?\s*([\d\-.]{5,10})/g;
+  let match;
+  while ((match = blockRegex.exec(text)) !== null){
+    let nome = match[1].trim().replace(/\s{2,}/g,' ');
+    // remove prefixos tipo "Sócio-Administrador" que às vezes grudam antes do nome
+    nome = nome.replace(/^(S[ÓO]CIO[- ]ADMINISTRADOR[A]?|ADMINISTRADOR[A]?)\s*/,'').trim();
+    if (nome.length < 5) continue;
+    const key = nome.toUpperCase();
+    if (socios.has(key)) continue; // já capturado (nome repete em cláusulas diferentes)
+
+    const bloco = match[0];
+
+    const cpfMatch = bloco.match(/CPF:?\s*(?:sob\s*n[ºo°.]?\s*)?[:\-]?\s*([\d]{2,3}[.\s]?[\d]{3}[.\s]?[\d]{3}[\s\-]?[\d]{2})/i);
+    const rgMatch = bloco.match(/RG\s*[:\-]?\s*([\d.\-]{5,15})/i);
+    const enderecoMatch = bloco.match(/DOMICILIAD[OA]\(?A?\)?\s*no\(a\)\s*([\s\S]*?CEP\s*[:\-]?\s*[\d\-.]{5,10})/i);
+
+    socios.set(key, {
+      nome,
+      cpf: cpfMatch ? cpfMatch[1].replace(/\s/g,'') : null,
+      rg: rgMatch ? rgMatch[1] : null,
+      endereco: enderecoMatch ? enderecoMatch[1].trim().replace(/\s{2,}/g,' ') : null,
+      percentual: null,
+      quotas: null
+    });
+  }
+
+  // 2) Isolar a tabela de capital social (entre "CAPITAL SOCIAL" e "DA ADMINISTRAÇÃO" / "ADMINISTRACAO")
+  const tableSectionMatch = text.match(/CAPITAL SOCIAL([\s\S]*?)DA\s*ADMINISTRA[ÇC][ÃA]O/i);
+  const tableSection = tableSectionMatch ? tableSectionMatch[1] : text;
+
+  for (const socio of socios.values()){
+    const escaped = socio.nome.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const rowRegex = new RegExp(escaped + '\\s+([\\d.\\s]{3,15}?)\\s+R\\$\\s*([\\d.,\\s]{3,15}?)\\s+([\\d]{1,3}[,.\\s]?\\d{0,2})\\s*%', 'i');
+    const rowMatch = tableSection.match(rowRegex);
+    if (rowMatch){
+      socio.quotas = rowMatch[1].trim().replace(/\s+/g,'.');
+      socio.percentual = rowMatch[3].trim().replace(/\s+/g,',') + '%';
+    }
+  }
+
+  return Array.from(socios.values());
+}
+
+function renderResults(socios, rawText){
+  if (!socios.length){
+    resultsEl.innerHTML = `
+      <div class="empty-state">
+        Não encontrei o padrão esperado de sócio/endereço/participação neste PDF.<br>
+        Confira o texto bruto extraído abaixo para ajustar manualmente.
+      </div>
+      ${rawTextBlock(rawText)}
+    `;
+    return;
+  }
+
+  let html = '';
+  socios.forEach(s => {
+    html += `
+      <div class="socio-card">
+        <h3>${escapeHtml(s.nome)} ${s.percentual ? `<span class="badge-pct">${escapeHtml(s.percentual)} da sociedade</span>` : ''}</h3>
+        <dl class="field-grid">
+          <dt>Endereço</dt>
+          <dd class="${s.endereco ? '' : 'missing'}">${s.endereco ? escapeHtml(s.endereco) : 'não localizado — conferir manualmente'}</dd>
+          <dt>CPF</dt>
+          <dd class="mono ${s.cpf ? '' : 'missing'}">${s.cpf ? escapeHtml(s.cpf) : 'não localizado'}</dd>
+          <dt>RG</dt>
+          <dd class="mono ${s.rg ? '' : 'missing'}">${s.rg ? escapeHtml(s.rg) : 'não localizado'}</dd>
+          <dt>Quotas</dt>
+          <dd class="${s.quotas ? '' : 'missing'}">${s.quotas ? escapeHtml(s.quotas) : 'não localizado'}</dd>
+        </dl>
+      </div>
+    `;
+  });
+
+  html += `
+    <div class="disclaimer">
+      Extração automática por leitura de texto do PDF — sempre confira os dados contra o documento original antes de usar oficialmente.
+      Se algum campo vier em branco, o texto do PDF provavelmente veio de uma digitalização/OCR com formatação diferente do esperado.
+    </div>
+  `;
+  html += rawTextBlock(rawText);
+
+  resultsEl.innerHTML = html;
+}
+
+function rawTextBlock(rawText){
+  return `
+    <details class="raw">
+      <summary>Ver texto bruto extraído do PDF (para conferência manual)</summary>
+      <pre>${escapeHtml(rawText)}</pre>
+    </details>
+  `;
+}
+
+function escapeHtml(str){
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+
+</body>
+</html>
