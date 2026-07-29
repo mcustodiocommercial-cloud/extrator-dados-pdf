@@ -358,70 +358,129 @@ prevBtn.addEventListener('click', () => { if(currentPage>1){ currentPage--; rend
 nextBtn.addEventListener('click', () => { if(pdfDoc && currentPage<pdfDoc.numPages){ currentPage++; renderPage(currentPage);} });
 
 async function extractFullText(doc){
-  let text = '';
+  // Reconstrói linhas reais da página usando a posição Y de cada fragmento de texto,
+  // em vez de simplesmente concatenar tudo — isso é essencial porque as cláusulas de
+  // sócio sempre começam no início de uma linha/parágrafo no documento original,
+  // e usamos essa estrutura como âncora na hora de procurar os sócios.
+  let fullText = '';
   for (let i=1; i<=doc.numPages; i++){
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map(it => it.str).join(' ');
-    text += pageText + '\n';
+    const items = content.items.filter(it => it.str.trim().length > 0);
+    items.sort((a,b) => {
+      const ay = a.transform[5], by = b.transform[5];
+      if (Math.abs(ay - by) > 2) return by - ay; // topo pra baixo
+      return a.transform[4] - b.transform[4]; // esquerda pra direita
+    });
+    let lines = [];
+    let currentLine = [];
+    let lastY = null;
+    items.forEach(it => {
+      const y = it.transform[5];
+      if (lastY !== null && Math.abs(y - lastY) > 2){
+        lines.push(currentLine.join(' '));
+        currentLine = [];
+      }
+      currentLine.push(it.str);
+      lastY = y;
+    });
+    if (currentLine.length) lines.push(currentLine.join(' '));
+    fullText += lines.join('\n') + '\n';
   }
-  return text;
+  return fullText;
 }
 
 // ---------- Parsing ----------
-function normalize(text){
-  return text.replace(/\u00A0/g,' ').replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,' \n ');
+function cleanSpaces(s){
+  return s.replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
 }
 
 function parseSocios(rawText){
-  const text = normalize(rawText).replace(/\n/g,' ');
-  const socios = new Map(); // nome normalizado -> dados
+  // Mantemos as quebras de linha reais (vindas da posição no PDF) porque a âncora
+  // de cada sócio é "nome no início da linha" — juntar tudo numa string só é o que
+  // causava nomes capturados errado nas primeiras versões.
+  let text = rawText.replace(/\u00A0/g,' ').replace(/[ \t]+/g,' ');
+  // Alguns contratos escrevem "Sócio Administrador NOME, nacionalidade..." com o
+  // prefixo em Título Case (nem tudo maiúsculo) na mesma linha do nome. Como a
+  // âncora abaixo exige nome em CAIXA ALTA logo no início da linha, removemos
+  // esse prefixo primeiro pra não quebrar a captura.
+  text = text.replace(/^\s*s[óo]cio[- ]?(administrador[a]?)?[:\-]?\s*/gim, '');
+  const socios = new Map();
+  const order = [];
 
-  // 1) Encontrar blocos "NOME ... nacionalidade: brasileir[o|a] ... CEP xxxx"
-  // Importante: o nome fica em CAIXA ALTA no documento, então NÃO usamos a flag
-  // de "ignorar maiúsculas/minúsculas" aqui — senão a captura avança pelo texto
-  // normal (minúsculo) do contrato e pega nome errado.
-  const blockRegex = /([A-ZÀ-Ü][A-ZÀ-Ü.\s]{4,70}?),?\s*[Nn]acionalidade:?\s*[Bb]rasileir[ao][\s\S]{0,700}?[Cc][Ee][Pp]\s*[:\-]?\s*([\d\-.]{5,10})/g;
+  // 1) Âncora: início de linha + NOME EM CAIXA ALTA + "brasileiro/a" (com ou sem a
+  // palavra "nacionalidade:" no meio — contratos variam nisso).
+  // O nome usa apenas [A-ZÀ-Ü . espaço] (não \s) para não atravessar quebras de linha
+  // e não colar em títulos/cabeçalhos anteriores também em caixa alta.
+  const anchorRegex = /^([A-ZÀ-Ü][A-ZÀ-Ü. ]{4,60}?),?\s*(?:[Nn]acionalidade:?\s*)?[Bb]rasileir[ao]\b/gm;
   let match;
-  while ((match = blockRegex.exec(text)) !== null){
-    let nome = match[1].trim().replace(/\s{2,}/g,' ');
-    // remove prefixos tipo "Sócio-Administrador" que às vezes grudam antes do nome
+  while ((match = anchorRegex.exec(text)) !== null){
+    let nome = cleanSpaces(match[1]);
     nome = nome.replace(/^(S[ÓO]CIO[- ]ADMINISTRADOR[A]?|ADMINISTRADOR[A]?)\s*/,'').trim();
-    if (nome.length < 5) continue;
+    if (nome.length < 5 || nome.split(' ').length < 2) continue; // exige nome+sobrenome
     const key = nome.toUpperCase();
-    if (socios.has(key)) continue; // já capturado (nome repete em cláusulas diferentes)
+    if (socios.has(key)) continue; // sócio já capturado numa cláusula anterior
 
-    const bloco = match[0];
+    // janela generosa após o nome pra pegar CPF/RG/endereço, que podem vir antes
+    // ou depois do CEP dependendo do contrato
+    const bloco = text.substr(match.index, 650);
 
-    const cpfMatch = bloco.match(/CPF:?\s*(?:sob\s*n[ºo°.]?\s*)?[:\-]?\s*([\d]{2,3}[.\s]?[\d]{3}[.\s]?[\d]{3}[\s\-]?[\d]{2})/i);
-    const rgMatch = bloco.match(/RG\s*[:\-]?\s*([\d.\-]{5,15})/i);
-    const enderecoMatch = bloco.match(/DOMICILIAD[OA]\(?A?\)?\s*no\(a\)\s*([\s\S]*?CEP\s*[:\-]?\s*[\d\-.]{5,10})/i);
+    const cpfMatch = bloco.match(/CPF\s*(?:n[ºo°.]?\s*)?[:\-]?\s*([\d]{2,3}[.\s]?[\d]{3}[.\s]?[\d]{3}[\s\-]?[\d]{2})/i);
+    const rgMatch = bloco.match(/RG\s*(?:n[ºo°.]?\s*)?[:\-]?\s*(\d[\d.\-]{4,14})/i);
+    const enderecoMatch = bloco.match(/domiciliad[oa]\(?a?\)?\s*(?:no\(a\)|no|na|em)\s*([\s\S]*?CEP:?\s*\d{2}\.?\d{3}-?\s*\d{3})/i);
+
+    let endereco = enderecoMatch ? cleanSpaces(enderecoMatch[1]) : null;
+    if (endereco) endereco = endereco.replace(/(\d)\s*-\s*(\d)/g, '$1-$2'); // conserta CEP quebrado em 2 linhas
 
     socios.set(key, {
       nome,
       cpf: cpfMatch ? cpfMatch[1].replace(/\s/g,'') : null,
       rg: rgMatch ? rgMatch[1] : null,
-      endereco: enderecoMatch ? enderecoMatch[1].trim().replace(/\s{2,}/g,' ') : null,
+      endereco,
       percentual: null,
       quotas: null
     });
+    order.push(key);
   }
 
-  // 2) Isolar a tabela de capital social (entre "CAPITAL SOCIAL" e "DA ADMINISTRAÇÃO" / "ADMINISTRACAO")
-  const tableSectionMatch = text.match(/CAPITAL SOCIAL([\s\S]*?)DA\s*ADMINISTRA[ÇC][ÃA]O/i);
+  // 2) Tabela de capital social: isolamos a seção entre "CAPITAL SOCIAL" e a
+  // próxima cláusula (nomes de cláusula variam: "TERCEIRA", "DA ADMINISTRAÇÃO" etc,
+  // então aceitamos qualquer um dos dois como fim de seção).
+  const tableSectionMatch = text.match(/CAPITAL SOCIAL([\s\S]{0,1800}?)(?:\nTERCEIRA\b|\nDA\s*ADMINISTRA[ÇC][ÃA]O)/i);
   const tableSection = tableSectionMatch ? tableSectionMatch[1] : text;
+  const tableLines = tableSection.split('\n');
 
-  for (const socio of socios.values()){
-    const escaped = socio.nome.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-    const rowRegex = new RegExp(escaped + '\\s+([\\d.\\s]{3,15}?)\\s+R\\$\\s*([\\d.,\\s]{3,15}?)\\s+([\\d]{1,3}[,.\\s]?\\d{0,2})\\s*%', 'i');
-    const rowMatch = tableSection.match(rowRegex);
-    if (rowMatch){
-      socio.quotas = rowMatch[1].trim().replace(/\s+/g,'.');
-      socio.percentual = rowMatch[3].trim().replace(/\s+/g,',') + '%';
-    }
-  }
+  // Não presumimos a ORDEM das colunas (quotas/valor/percentual varia de contrato
+  // pra contrato) — em vez disso, achamos a linha da tabela que começa com o nome
+  // do sócio, e dentro dela identificamos cada número pelo seu formato: o que tem
+  // "%" é o percentual, o que vem depois de "R$" é o valor, e o que sobra é a quota.
+  order.forEach(key => {
+    const socio = socios.get(key);
+    const rowLine = tableLines.find(l => l.trim().startsWith(socio.nome));
+    if (!rowLine) return;
+    const rest = rowLine.trim().slice(socio.nome.length);
 
-  return Array.from(socios.values());
+    // Separador decimal aceito: vírgula ou ponto. Propositalmente NÃO aceitamos
+    // espaço como separador aqui — em contratos bem formatados isso gruda por
+    // engano no número de quotas vizinho (ex: "1.500 50%" virava "500,50%").
+    // Em PDFs escaneados/OCR onde a pontuação se perde, o percentual pode vir
+    // incompleto; por isso deixamos sempre visível o texto bruto pra conferência.
+    const pctMatch = rest.match(/(\d{1,3})(?:[.,](\d{1,2}))?\s*%/);
+    const valMatch = rest.match(/R\$\s*([\d.,\s]{3,15})/);
+
+    // "mascara" os trechos já identificados pra não deixar a busca de quotas
+    // atravessar por cima dos dígitos do percentual/valor
+    let masked = rest;
+    [pctMatch, valMatch].forEach(m => {
+      if (m) masked = masked.slice(0, m.index) + ' '.repeat(m[0].length) + masked.slice(m.index + m[0].length);
+    });
+    const quotasMatch = masked.match(/\d[\d.,]*\d|\d/);
+
+    socio.quotas = quotasMatch ? quotasMatch[0].trim() : null;
+    socio.percentual = pctMatch ? pctMatch[1] + (pctMatch[2] ? ',' + pctMatch[2] : '') + '%' : null;
+  });
+
+  return order.map(k => socios.get(k));
 }
 
 function renderResults(socios, rawText){
