@@ -610,13 +610,14 @@ ${fullText.slice(0, 60000)}
 """`;
 
   // O Google troca os nomes/versões dos modelos gratuitos com frequência — se um
-  // não existir mais (erro 404), tentamos o próximo da lista automaticamente,
-  // em vez de simplesmente falhar.
-  const MODEL_CANDIDATES = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.5-flash'];
+  // não existir mais (404) tentamos o próximo da lista. Colocamos o modelo mais
+  // estável (2.5) primeiro, já que o mais novo (3.5) costuma ficar sobrecarregado
+  // em picos de uso ("high demand" / 503) por ser o padrão de todo mundo agora.
+  const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  let resp, lastErrBody = '', usedModel = '';
-  for (const model of MODEL_CANDIDATES){
-    resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  async function callModel(model){
+    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -631,18 +632,34 @@ ${fullText.slice(0, 60000)}
         }
       })
     });
+  }
+
+  let resp, lastErrBody = '', usedModel = '';
+  for (const model of MODEL_CANDIDATES){
     usedModel = model;
-    if (resp.status !== 404) break; // 404 = modelo não existe mais, tenta o próximo
+    // até 3 tentativas no mesmo modelo se ele estiver temporariamente sobrecarregado
+    for (let attempt = 0; attempt < 3; attempt++){
+      resp = await callModel(model);
+      if (resp.status !== 503 && resp.status !== 429) break;
+      lastErrBody = await resp.text().catch(() => '');
+      if (attempt < 2) await sleep(1500 * (attempt + 1)); // espera 1.5s, depois 3s
+    }
+    if (resp.status !== 404) break; // 404 = modelo não existe mais, tenta o próximo da lista
     lastErrBody = await resp.text().catch(() => '');
   }
 
   if (!resp.ok){
-    const errBody = resp.status === 404 ? lastErrBody : await resp.text().catch(() => '');
+    // o corpo da resposta só pode ser lido uma vez — se já lemos durante as
+    // tentativas (503/429/404), reaproveitamos; senão lemos agora.
+    const errBody = lastErrBody || await resp.text().catch(() => '');
     if (resp.status === 400 || resp.status === 403){
       throw new Error('Chave de API inválida, expirada ou sem permissão (confira em 🔑 Chave de API). Detalhe: ' + errBody.slice(0,200));
     }
     if (resp.status === 429){
       throw new Error('Limite gratuito da API atingido no momento — espere um pouco e tente de novo.');
+    }
+    if (resp.status === 503){
+      throw new Error('Os modelos gratuitos do Gemini estão sobrecarregados agora (isso é do Google, não do site). Espere um minuto e tente de novo.');
     }
     if (resp.status === 404){
       throw new Error('Nenhum dos modelos do Gemini testados (' + MODEL_CANDIDATES.join(', ') + ') respondeu. O Google pode ter renomeado o modelo — me avise que eu atualizo.');
