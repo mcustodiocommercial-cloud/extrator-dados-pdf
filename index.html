@@ -41,6 +41,19 @@
     font-weight:700; font-size:14px; color: var(--gold);
     flex-shrink:0;
   }
+  #apiKeyBtn{
+    background: rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.25);
+    color:#E7EDF2;
+    font-size:12.5px;
+    padding:7px 12px;
+    border-radius:20px;
+    cursor:pointer;
+    flex-shrink:0;
+    white-space:nowrap;
+  }
+  #apiKeyBtn:hover{ background: rgba(255,255,255,.16); }
+  #apiKeyBtn.set{ border-color: var(--gold); color: var(--gold); }
   header h1{
     font-size:18px;
     margin:0;
@@ -233,17 +246,124 @@
     padding-top:14px;
     border-top:1px solid var(--line);
   }
+
+  /* IA */
+  .ai-banner{
+    background:#EEF3F7;
+    border:1px solid #CFE0EA;
+    border-radius:8px;
+    padding:14px 16px;
+    margin-bottom:16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .ai-banner p{ margin:0; font-size:13px; color: var(--navy-dark); }
+  .btn-ai{
+    background: var(--navy);
+    color:#fff;
+    border:none;
+    border-radius:6px;
+    padding:9px 16px;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .btn-ai:hover{ background: var(--navy-dark); }
+  .btn-ai:disabled{ opacity:.6; cursor:default; }
+  .btn-ai-ghost{
+    background:transparent;
+    border:1px solid var(--navy);
+    color: var(--navy);
+  }
+  .btn-ai-ghost:hover{ background:#EEF3F7; }
+  .source-tag{
+    display:inline-block;
+    font-size:10.5px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.4px;
+    padding:2px 8px;
+    border-radius:20px;
+    margin-left:8px;
+    vertical-align:middle;
+  }
+  .source-tag.regex{ background:#E7EEF2; color: var(--navy-dark); }
+  .source-tag.ia{ background: var(--gold-soft); color:#7A5E14; }
+
+  /* Modal chave de API */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(20,25,32,.55);
+    display:none;
+    align-items:center; justify-content:center;
+    z-index:50;
+    padding:20px;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-box{
+    background:#fff;
+    border-radius:10px;
+    max-width:440px;
+    width:100%;
+    padding:24px;
+  }
+  .modal-box h2{ margin:0 0 6px; font-size:16px; }
+  .modal-box p{ font-size:12.5px; color: var(--ink-soft); line-height:1.5; margin:0 0 14px; }
+  .modal-box input{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    font-size:13px;
+    box-sizing:border-box;
+    margin-bottom:14px;
+  }
+  .modal-actions{ display:flex; gap:10px; justify-content:flex-end; }
+  .modal-actions button{
+    padding:8px 16px;
+    border-radius:6px;
+    font-size:13px;
+    cursor:pointer;
+    border:1px solid var(--line);
+    background:#fff;
+  }
+  .modal-actions .save{ background: var(--navy); color:#fff; border-color: var(--navy); }
+  .modal-actions .clear{ color: var(--danger); border-color:#EAD0D0; }
 </style>
 </head>
 <body>
 
 <header>
   <div class="selo">JC</div>
-  <div>
+  <div style="flex:1;">
     <h1>Extrator de Sócios — Contrato Social</h1>
     <p>Leitura automática de nome, endereço e participação societária a partir do PDF</p>
   </div>
+  <button id="apiKeyBtn" title="Configurar chave da API Gemini (grátis)">🔑 Chave de API (grátis)</button>
 </header>
+
+<div class="modal-overlay" id="apiKeyModal">
+  <div class="modal-box">
+    <h2>Chave da API Gemini</h2>
+    <p>
+      Usamos a <strong>API gratuita do Google Gemini</strong> como modo de leitura por IA —
+      não tem cartão de crédito envolvido. Pegue sua chave grátis em
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
+      (entra com sua conta Google, clica em "Create API key", copia e cola aqui).
+      A chave fica salva só no seu navegador (nunca é enviada pra nenhum lugar além do Google).
+    </p>
+    <input type="password" id="apiKeyInput" placeholder="Cole sua chave aqui (começa com AIza...)">
+    <div class="modal-actions">
+      <button class="clear" id="apiKeyClearBtn">Remover chave</button>
+      <button id="apiKeyCancelBtn">Cancelar</button>
+      <button class="save" id="apiKeySaveBtn">Salvar</button>
+    </div>
+  </div>
+</div>
 
 <main>
   <section class="panel">
@@ -289,6 +409,39 @@ const pageInfo = document.getElementById('pageInfo');
 const prevBtn = document.getElementById('prevPage');
 const nextBtn = document.getElementById('nextPage');
 const resultsEl = document.getElementById('results');
+const apiKeyBtn = document.getElementById('apiKeyBtn');
+const apiKeyModal = document.getElementById('apiKeyModal');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const apiKeySaveBtn = document.getElementById('apiKeySaveBtn');
+const apiKeyCancelBtn = document.getElementById('apiKeyCancelBtn');
+const apiKeyClearBtn = document.getElementById('apiKeyClearBtn');
+
+const GEMINI_KEY_STORAGE = 'extrator_socios_gemini_key';
+
+function getApiKey(){ return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; }
+function setApiKeyUiState(){
+  apiKeyBtn.classList.toggle('set', !!getApiKey());
+}
+setApiKeyUiState();
+
+apiKeyBtn.addEventListener('click', () => {
+  apiKeyInput.value = getApiKey();
+  apiKeyModal.classList.add('show');
+});
+apiKeyCancelBtn.addEventListener('click', () => apiKeyModal.classList.remove('show'));
+apiKeyModal.addEventListener('click', (e) => { if (e.target === apiKeyModal) apiKeyModal.classList.remove('show'); });
+apiKeySaveBtn.addEventListener('click', () => {
+  const val = apiKeyInput.value.trim();
+  if (val) localStorage.setItem(GEMINI_KEY_STORAGE, val);
+  setApiKeyUiState();
+  apiKeyModal.classList.remove('show');
+});
+apiKeyClearBtn.addEventListener('click', () => {
+  localStorage.removeItem(GEMINI_KEY_STORAGE);
+  apiKeyInput.value = '';
+  setApiKeyUiState();
+  apiKeyModal.classList.remove('show');
+});
 
 let pdfDoc = null;
 let currentPage = 1;
@@ -313,6 +466,8 @@ function hideStatus(){
   statusEl.className = '';
 }
 
+let lastExtractedText = '';
+
 async function handleFile(file){
   if (file.type !== 'application/pdf'){
     showStatus('Esse arquivo não é um PDF. Envie o PDF do contrato social.', 'error');
@@ -331,8 +486,26 @@ async function handleFile(file){
     await renderPage(currentPage);
 
     const fullText = await extractFullText(pdfDoc);
-    const socios = parseSocios(fullText);
-    renderResults(socios, fullText);
+    lastExtractedText = fullText;
+    let socios = parseSocios(fullText);
+
+    if (socios.length === 0 && getApiKey()){
+      // Modo automático não achou nada e já existe uma chave salva —
+      // tenta a IA sozinho, sem esperar o usuário clicar em nada.
+      showStatus('Leitura automática não encontrou os sócios — tentando com IA…', 'info');
+      resultsEl.innerHTML = '<div class="empty-state">🤖 Lendo com IA…</div>';
+      try{
+        socios = await extractWithAI(fullText);
+        renderResults(socios, fullText, 'ia');
+        hideStatus();
+        return;
+      }catch(err){
+        console.error(err);
+        // se a IA também falhar, cai de volta pro resultado (vazio) da leitura automática
+      }
+    }
+
+    renderResults(socios, fullText, 'regex');
     hideStatus();
   }catch(err){
     console.error(err);
@@ -390,7 +563,88 @@ async function extractFullText(doc){
   return fullText;
 }
 
-// ---------- Parsing ----------
+// ---------- Extração via IA (Gemini, gratuito) ----------
+async function extractWithAI(fullText){
+  const apiKey = getApiKey();
+  if (!apiKey){
+    apiKeyModal.classList.add('show');
+    throw new Error('Configure sua chave de API primeiro.');
+  }
+
+  const schema = {
+    type: 'object',
+    properties: {
+      socios: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            nome: { type: 'string' },
+            endereco: { type: 'string' },
+            cpf: { type: 'string' },
+            rg: { type: 'string' },
+            quotas: { type: 'string' },
+            percentual: { type: 'string' }
+          },
+          required: ['nome']
+        }
+      }
+    },
+    required: ['socios']
+  };
+
+  const prompt = `Você vai ler o texto extraído de um Contrato Social (ou Certidão de Inteiro Teor da JUCESP) em português e identificar APENAS os sócios/quotistas da empresa — não inclua contadores, procuradores, secretários da junta comercial, julgadores ou testemunhas.
+
+Para cada sócio, extraia (deixe null quando a informação não existir no texto, não invente nada):
+- nome: nome completo do sócio
+- endereco: endereço completo (logradouro, número, bairro, cidade, UF, CEP)
+- cpf: CPF do sócio
+- rg: RG do sócio
+- quotas: número de quotas que ele detém
+- percentual: percentual de participação na sociedade (ex: "50%")
+
+Texto do documento:
+"""
+${fullText.slice(0, 60000)}
+"""`;
+
+  const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey
+    },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+        temperature: 0
+      }
+    })
+  });
+
+  if (!resp.ok){
+    const errBody = await resp.text().catch(() => '');
+    if (resp.status === 400 || resp.status === 403){
+      throw new Error('Chave de API inválida ou sem permissão. Confira em 🔑 Chave de API.');
+    }
+    if (resp.status === 429){
+      throw new Error('Limite gratuito da API atingido no momento — espere um pouco e tente de novo.');
+    }
+    throw new Error('A API do Gemini retornou um erro. ' + errBody.slice(0,200));
+  }
+
+  const data = await resp.json();
+  const textOut = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+  let parsed;
+  try{
+    parsed = JSON.parse(textOut);
+  }catch(e){
+    throw new Error('A IA respondeu em um formato inesperado. Tente novamente.');
+  }
+  return (parsed.socios || []).filter(s => s.nome);
+}
 function cleanSpaces(s){
   return s.replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
 }
@@ -483,19 +737,35 @@ function parseSocios(rawText){
   return order.map(k => socios.get(k));
 }
 
-function renderResults(socios, rawText){
-  if (!socios.length){
-    resultsEl.innerHTML = `
-      <div class="empty-state">
-        Não encontrei o padrão esperado de sócio/endereço/participação neste PDF.<br>
-        Confira o texto bruto extraído abaixo para ajustar manualmente.
+function renderResults(socios, rawText, source){
+  let html = '';
+
+  const aiAvailable = true; // API gratuita do Gemini, só precisa da chave
+  const banner = source === 'regex'
+    ? `<div class="ai-banner">
+         <p>${socios.length ? 'Conferido tudo? Se algum dado ficou errado ou faltando, a IA costuma pegar variações que a leitura automática não prevê.' : 'Não encontrei o padrão esperado de sócio/endereço/participação com a leitura automática.'}</p>
+         <button class="btn-ai" id="tryAiBtn">🤖 ${socios.length ? 'Tentar de novo com IA' : 'Tentar com IA'}</button>
+       </div>`
+    : `<div class="ai-banner">
+         <p>Resultado gerado por IA (Gemini). Sempre confira contra o PDF antes de usar oficialmente.</p>
+         <button class="btn-ai btn-ai-ghost" id="tryRegexBtn">↺ Voltar pra leitura automática</button>
+       </div>`;
+
+  if (!socios.length && source === 'regex'){
+    html = `
+      ${banner}
+      <div class="empty-state" style="padding:30px 20px;">
+        Confira o texto bruto extraído abaixo para ajustar manualmente, ou tente o botão de IA acima.
       </div>
       ${rawTextBlock(rawText)}
     `;
+    resultsEl.innerHTML = html;
+    wireAiButtons(rawText);
     return;
   }
 
-  let html = '';
+  html += banner;
+
   socios.forEach(s => {
     html += `
       <div class="socio-card">
@@ -516,13 +786,40 @@ function renderResults(socios, rawText){
 
   html += `
     <div class="disclaimer">
-      Extração automática por leitura de texto do PDF — sempre confira os dados contra o documento original antes de usar oficialmente.
-      Se algum campo vier em branco, o texto do PDF provavelmente veio de uma digitalização/OCR com formatação diferente do esperado.
+      ${source === 'regex' ? 'Extração automática por leitura de texto do PDF' : 'Extração via IA (Gemini)'} — sempre confira os dados contra o documento original antes de usar oficialmente.
     </div>
   `;
   html += rawTextBlock(rawText);
 
   resultsEl.innerHTML = html;
+  wireAiButtons(rawText);
+}
+
+function wireAiButtons(rawText){
+  const tryAiBtn = document.getElementById('tryAiBtn');
+  if (tryAiBtn){
+    tryAiBtn.addEventListener('click', async () => {
+      tryAiBtn.disabled = true;
+      tryAiBtn.textContent = '🤖 Lendo com IA…';
+      try{
+        const socios = await extractWithAI(lastExtractedText || rawText);
+        renderResults(socios, lastExtractedText || rawText, 'ia');
+      }catch(err){
+        tryAiBtn.disabled = false;
+        tryAiBtn.textContent = '🤖 Tentar com IA';
+        if (err.message !== 'Configure sua chave de API primeiro.'){
+          showStatus(err.message, 'error');
+        }
+      }
+    });
+  }
+  const tryRegexBtn = document.getElementById('tryRegexBtn');
+  if (tryRegexBtn){
+    tryRegexBtn.addEventListener('click', () => {
+      const socios = parseSocios(lastExtractedText || rawText);
+      renderResults(socios, lastExtractedText || rawText, 'regex');
+    });
+  }
 }
 
 function rawTextBlock(rawText){
