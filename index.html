@@ -489,24 +489,25 @@ async function handleFile(file){
     lastExtractedText = fullText;
     let socios = parseSocios(fullText);
 
-    if (socios.length === 0 && getApiKey()){
-      // Modo automático não achou nada e já existe uma chave salva —
-      // tenta a IA sozinho, sem esperar o usuário clicar em nada.
-      showStatus('Leitura automática não encontrou os sócios — tentando com IA…', 'info');
+    if (getApiKey()){
+      // Se já existe uma chave salva, deixamos a IA como fonte principal — ela lida
+      // muito melhor com a variação de formato entre contratos do que o regex.
+      showStatus(socios.length ? 'Conferindo com IA…' : 'Leitura automática não encontrou os sócios — tentando com IA…', 'info');
       resultsEl.innerHTML = '<div class="empty-state">🤖 Lendo com IA…</div>';
       try{
-        socios = await extractWithAI(fullText);
-        renderResults(socios, fullText, 'ia');
+        const socioIA = await extractWithAI(fullText);
+        renderResults(socioIA, fullText, 'ia');
         hideStatus();
         return;
       }catch(err){
         console.error(err);
-        // se a IA também falhar, cai de volta pro resultado (vazio) da leitura automática
+        showStatus('A IA não conseguiu processar: ' + err.message, 'error');
+        // segue abaixo e mostra pelo menos o resultado (mesmo vazio) da leitura automática
       }
     }
 
     renderResults(socios, fullText, 'regex');
-    hideStatus();
+    if (!getApiKey() || socios.length) hideStatus();
   }catch(err){
     console.error(err);
     showStatus('Não consegui ler esse PDF. Confirme se o arquivo não está corrompido e tente de novo.', 'error');
@@ -608,40 +609,63 @@ Texto do documento:
 ${fullText.slice(0, 60000)}
 """`;
 
-  const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey
-    },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: schema,
-        temperature: 0
-      }
-    })
-  });
+  // O Google troca os nomes/versões dos modelos gratuitos com frequência — se um
+  // não existir mais (erro 404), tentamos o próximo da lista automaticamente,
+  // em vez de simplesmente falhar.
+  const MODEL_CANDIDATES = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.5-flash'];
+
+  let resp, lastErrBody = '', usedModel = '';
+  for (const model of MODEL_CANDIDATES){
+    resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: schema,
+          temperature: 0
+        }
+      })
+    });
+    usedModel = model;
+    if (resp.status !== 404) break; // 404 = modelo não existe mais, tenta o próximo
+    lastErrBody = await resp.text().catch(() => '');
+  }
 
   if (!resp.ok){
-    const errBody = await resp.text().catch(() => '');
+    const errBody = resp.status === 404 ? lastErrBody : await resp.text().catch(() => '');
     if (resp.status === 400 || resp.status === 403){
-      throw new Error('Chave de API inválida ou sem permissão. Confira em 🔑 Chave de API.');
+      throw new Error('Chave de API inválida, expirada ou sem permissão (confira em 🔑 Chave de API). Detalhe: ' + errBody.slice(0,200));
     }
     if (resp.status === 429){
       throw new Error('Limite gratuito da API atingido no momento — espere um pouco e tente de novo.');
     }
-    throw new Error('A API do Gemini retornou um erro. ' + errBody.slice(0,200));
+    if (resp.status === 404){
+      throw new Error('Nenhum dos modelos do Gemini testados (' + MODEL_CANDIDATES.join(', ') + ') respondeu. O Google pode ter renomeado o modelo — me avise que eu atualizo.');
+    }
+    throw new Error(`Erro ${resp.status} na API do Gemini (modelo ${usedModel}). ` + errBody.slice(0,200));
   }
 
   const data = await resp.json();
-  const textOut = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+
+  if (!data.candidates || !data.candidates.length){
+    const blockReason = data.promptFeedback?.blockReason;
+    if (blockReason){
+      throw new Error('O Gemini bloqueou a resposta (motivo: ' + blockReason + '). Tente novamente ou use a leitura automática.');
+    }
+    throw new Error('O Gemini não retornou nenhuma resposta. Tente novamente em instantes.');
+  }
+
+  const textOut = data.candidates[0]?.content?.parts?.map(p => p.text || '').join('') || '';
   let parsed;
   try{
     parsed = JSON.parse(textOut);
   }catch(e){
-    throw new Error('A IA respondeu em um formato inesperado. Tente novamente.');
+    throw new Error('A IA respondeu em um formato inesperado: ' + textOut.slice(0,150));
   }
   return (parsed.socios || []).filter(s => s.nome);
 }
