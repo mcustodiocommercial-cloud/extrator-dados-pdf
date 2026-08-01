@@ -76,6 +76,29 @@
   @media(min-width:960px){
     main{ grid-template-columns: 380px 1fr; align-items:start; }
   }
+  .tabs{
+    max-width:1200px;
+    margin: 20px auto 0;
+    padding: 0 24px;
+    display:flex;
+    gap:8px;
+  }
+  .tab-btn{
+    background:#EDECE8;
+    border:1px solid var(--line);
+    border-bottom:none;
+    color: var(--ink-soft);
+    font-size:13px;
+    font-weight:600;
+    padding:10px 18px;
+    border-radius:8px 8px 0 0;
+    cursor:pointer;
+  }
+  .tab-btn.active{
+    background: var(--paper);
+    color: var(--navy-dark);
+    border-color: var(--line);
+  }
   .panel{
     background: var(--paper);
     border:1px solid var(--line);
@@ -365,7 +388,12 @@
   </div>
 </div>
 
-<main>
+<div class="tabs">
+  <button class="tab-btn active" id="tabSociosBtn">📄 Contrato Social</button>
+  <button class="tab-btn" id="tabCnpjBtn">🪪 Cartão CNPJ</button>
+</div>
+
+<main id="mainSocios">
   <section class="panel">
     <div class="panel-header">Documento</div>
     <div id="dropzone">
@@ -396,6 +424,37 @@
   </section>
 </main>
 
+<main id="mainCnpj" style="display:none;">
+  <section class="panel">
+    <div class="panel-header">Documento</div>
+    <div id="dropzoneCnpj">
+      <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0-3 3m3-3 3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" /></svg>
+      <div class="primary">Clique ou arraste o PDF do Cartão CNPJ</div>
+      <div class="secondary">Comprovante de Inscrição e de Situação Cadastral da Receita Federal</div>
+    </div>
+    <input type="file" id="fileInputCnpj" accept="application/pdf">
+    <div id="fileMetaCnpj"></div>
+    <div id="statusCnpj"></div>
+
+    <div id="pdfViewerCnpj"></div>
+    <div class="page-nav" id="pageNavCnpj" style="display:none;">
+      <button id="prevPageCnpj">‹ anterior</button>
+      <span id="pageInfoCnpj">página 1 / 1</span>
+      <button id="nextPageCnpj">próxima ›</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">Dados do CNPJ</div>
+    <div id="resultsCnpj">
+      <div class="empty-state">
+        <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+        <div>Envie o PDF do Cartão CNPJ para ver os dados extraídos aqui.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
@@ -416,9 +475,24 @@ const apiKeySaveBtn = document.getElementById('apiKeySaveBtn');
 const apiKeyCancelBtn = document.getElementById('apiKeyCancelBtn');
 const apiKeyClearBtn = document.getElementById('apiKeyClearBtn');
 
+// ====================================================================
+// CHAVE DE API PADRÃO (opcional)
+// Se você quiser que o site já venha com a chave preenchida (sem precisar
+// clicar em "🔑 Chave de API" e colar toda vez que abrir num navegador novo),
+// cole sua chave do Google AI Studio aqui embaixo, entre as aspas.
+//
+// IMPORTANTE: como esse arquivo vai ficar público no GitHub Pages, qualquer
+// pessoa que abrir "ver código-fonte" da página vai conseguir ver essa chave.
+// Como é uma chave GRATUITA (sem cartão de crédito, sem cobrança), o pior que
+// pode acontecer é alguém gastar sua cota diária — não vai gerar nenhuma
+// fatura. Mesmo assim, gere uma chave NOVA pra colar aqui (revogue a antiga
+// se ela já apareceu em algum print ou mensagem antes) em aistudio.google.com/apikey
+// ====================================================================
+const DEFAULT_GEMINI_API_KEY = 'AQ.Ab8RN6L5D2e2hMxx4eI5maSdvGMgZnM1G8glzqPNXB-SLYhQxg'; // <- cole sua chave nova aqui dentro das aspas
+
 const GEMINI_KEY_STORAGE = 'extrator_socios_gemini_key';
 
-function getApiKey(){ return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; }
+function getApiKey(){ return localStorage.getItem(GEMINI_KEY_STORAGE) || DEFAULT_GEMINI_API_KEY || ''; }
 function setApiKeyUiState(){
   apiKeyBtn.classList.toggle('set', !!getApiKey());
 }
@@ -445,6 +519,20 @@ apiKeyClearBtn.addEventListener('click', () => {
 
 let pdfDoc = null;
 let currentPage = 1;
+
+// ---------- Abas ----------
+const tabSociosBtn = document.getElementById('tabSociosBtn');
+const tabCnpjBtn = document.getElementById('tabCnpjBtn');
+const mainSocios = document.getElementById('mainSocios');
+const mainCnpj = document.getElementById('mainCnpj');
+tabSociosBtn.addEventListener('click', () => {
+  tabSociosBtn.classList.add('active'); tabCnpjBtn.classList.remove('active');
+  mainSocios.style.display = ''; mainCnpj.style.display = 'none';
+});
+tabCnpjBtn.addEventListener('click', () => {
+  tabCnpjBtn.classList.add('active'); tabSociosBtn.classList.remove('active');
+  mainCnpj.style.display = ''; mainSocios.style.display = 'none';
+});
 
 dropzone.addEventListener('click', () => fileInput.click());
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
@@ -875,6 +963,199 @@ function rawTextBlock(rawText){
 function escapeHtml(str){
   return String(str)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ================= CNPJ (Comprovante de Inscrição e Situação Cadastral) =================
+const dropzoneCnpj = document.getElementById('dropzoneCnpj');
+const fileInputCnpj = document.getElementById('fileInputCnpj');
+const fileMetaCnpj = document.getElementById('fileMetaCnpj');
+const statusCnpjEl = document.getElementById('statusCnpj');
+const pdfViewerCnpj = document.getElementById('pdfViewerCnpj');
+const pageNavCnpj = document.getElementById('pageNavCnpj');
+const pageInfoCnpj = document.getElementById('pageInfoCnpj');
+const prevBtnCnpj = document.getElementById('prevPageCnpj');
+const nextBtnCnpj = document.getElementById('nextPageCnpj');
+const resultsCnpjEl = document.getElementById('resultsCnpj');
+
+let pdfDocCnpj = null;
+let currentPageCnpj = 1;
+
+dropzoneCnpj.addEventListener('click', () => fileInputCnpj.click());
+dropzoneCnpj.addEventListener('dragover', e => { e.preventDefault(); dropzoneCnpj.classList.add('drag'); });
+dropzoneCnpj.addEventListener('dragleave', () => dropzoneCnpj.classList.remove('drag'));
+dropzoneCnpj.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzoneCnpj.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFileCnpj(e.dataTransfer.files[0]);
+});
+fileInputCnpj.addEventListener('change', e => {
+  if (e.target.files.length) handleFileCnpj(e.target.files[0]);
+});
+
+function showStatusCnpj(msg, type){
+  statusCnpjEl.textContent = msg;
+  statusCnpjEl.className = 'show ' + (type || 'info');
+}
+function hideStatusCnpj(){ statusCnpjEl.className = ''; }
+
+async function handleFileCnpj(file){
+  if (file.type !== 'application/pdf'){
+    showStatusCnpj('Esse arquivo não é um PDF. Envie o PDF do Cartão CNPJ.', 'error');
+    return;
+  }
+  fileMetaCnpj.innerHTML = `<strong>${file.name}</strong> · ${(file.size/1024/1024).toFixed(2)} MB`;
+  fileMetaCnpj.classList.add('show');
+  showStatusCnpj('Lendo o documento…', 'info');
+  resultsCnpjEl.innerHTML = '<div class="empty-state">Analisando o PDF…</div>';
+
+  try{
+    const buffer = await file.arrayBuffer();
+    pdfDocCnpj = await pdfjsLib.getDocument({ data: buffer }).promise;
+    currentPageCnpj = 1;
+    pageNavCnpj.style.display = 'flex';
+    await renderPageCnpj(currentPageCnpj);
+
+    const fullText = await extractFullText(pdfDocCnpj); // mesma função usada no contrato social
+    const dados = parseCNPJ(fullText);
+    renderResultsCnpj(dados, fullText);
+    hideStatusCnpj();
+  }catch(err){
+    console.error(err);
+    showStatusCnpj('Não consegui ler esse PDF. Confirme se o arquivo não está corrompido e tente de novo.', 'error');
+    resultsCnpjEl.innerHTML = '<div class="empty-state">Não foi possível processar o documento.</div>';
+  }
+}
+
+async function renderPageCnpj(num){
+  const page = await pdfDocCnpj.getPage(num);
+  const viewport = page.getViewport({ scale: 1.4 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  pdfViewerCnpj.innerHTML = '';
+  pdfViewerCnpj.appendChild(canvas);
+  pageInfoCnpj.textContent = `página ${num} / ${pdfDocCnpj.numPages}`;
+  prevBtnCnpj.disabled = num <= 1;
+  nextBtnCnpj.disabled = num >= pdfDocCnpj.numPages;
+}
+prevBtnCnpj.addEventListener('click', () => { if(currentPageCnpj>1){ currentPageCnpj--; renderPageCnpj(currentPageCnpj);} });
+nextBtnCnpj.addEventListener('click', () => { if(pdfDocCnpj && currentPageCnpj<pdfDocCnpj.numPages){ currentPageCnpj++; renderPageCnpj(currentPageCnpj);} });
+
+// O Cartão CNPJ é um formulário padronizado da Receita Federal: cada campo é um
+// RÓTULO em CAIXA ALTA seguido do VALOR. Como a posição exata (mesma linha, linha
+// seguinte, ou rótulos agrupados numa linha de tabela) pode variar dependendo de
+// como o PDF foi gerado, usamos duas camadas: 1) rótulo → valor na linha seguinte
+// (o caso mais comum), e 2) reforço por FORMATO (CNPJ, CEP e UF têm formatos bem
+// específicos) que corrige o campo mesmo se a camada 1 pegar errado ou nada.
+const CNPJ_LABELS = {
+  numeroInscricao: /^N[ÚU]MERO DE INSCRI[ÇC][ÃA]O$/i,
+  dataAbertura: /^DATA DE ABERTURA$/i,
+  nomeEmpresarial: /^NOME EMPRESARIAL$/i,
+  atividadePrincipal: /^C[ÓO]DIGO E DESCRI[ÇC][ÃA]O DA ATIVIDADE ECON[ÔO]MICA PRINCIPAL$/i,
+  logradouro: /^LOGRADOURO$/i,
+  numero: /^N[ÚU]MERO$/i, // "NÚMERO" sozinho — diferente de "NÚMERO DE INSCRIÇÃO"
+  complemento: /^COMPLEMENTO$/i,
+  cep: /^CEP$/i,
+  bairro: /^BAIRRO\/?DISTRITO$/i,
+  municipio: /^MUNIC[ÍI]PIO$/i,
+  uf: /^UF$/i
+};
+const UF_LIST = 'AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO';
+
+function valueAfterLabel(lines, labelRegex){
+  const idx = lines.findIndex(l => labelRegex.test(l.trim()));
+  if (idx === -1) return null;
+  for (let i = idx + 1; i < lines.length; i++){
+    const v = lines[i].trim();
+    if (!v) continue;
+    // se a linha seguinte também é rótulo de outro campo (tabela com colunas lado
+    // a lado), não é o valor deste campo — desistimos em vez de errar
+    const isAnotherLabel = Object.values(CNPJ_LABELS).some(re => re.test(v));
+    if (isAnotherLabel) return null;
+    return v;
+  }
+  return null;
+}
+
+function parseCNPJ(rawText){
+  const lines = rawText.replace(/\u00A0/g,' ').split('\n').map(l => l.replace(/[ \t]+/g,' ').trim()).filter(l => l.length);
+  const text = lines.join('\n');
+
+  let numeroInscricao = valueAfterLabel(lines, CNPJ_LABELS.numeroInscricao);
+  const dataAbertura = valueAfterLabel(lines, CNPJ_LABELS.dataAbertura);
+  const nomeEmpresarial = valueAfterLabel(lines, CNPJ_LABELS.nomeEmpresarial);
+  const atividadePrincipal = valueAfterLabel(lines, CNPJ_LABELS.atividadePrincipal);
+  const logradouro = valueAfterLabel(lines, CNPJ_LABELS.logradouro);
+  const numero = valueAfterLabel(lines, CNPJ_LABELS.numero);
+  let complemento = valueAfterLabel(lines, CNPJ_LABELS.complemento);
+  let cep = valueAfterLabel(lines, CNPJ_LABELS.cep);
+  const bairro = valueAfterLabel(lines, CNPJ_LABELS.bairro);
+  const municipio = valueAfterLabel(lines, CNPJ_LABELS.municipio);
+  let uf = valueAfterLabel(lines, CNPJ_LABELS.uf);
+
+  // Reforço por formato — cobre o caso de colunas lado a lado na tabela, onde o
+  // rótulo e o valor podem não ficar em linhas adjacentes simples.
+  if (!numeroInscricao || !/^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(numeroInscricao)){
+    const m = text.match(/(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/);
+    if (m) numeroInscricao = m[1];
+  }
+  if (!cep || !/^\d{2}\.?\d{3}-\d{3}$/.test(cep)){
+    const m = text.match(/(\d{2}\.?\d{3}-\d{3})/);
+    if (m) cep = m[1];
+  }
+  if (!uf || !new RegExp('^(' + UF_LIST + ')$').test(uf)){
+    // pega a ÚLTIMA sigla de UF válida no texto (a do endereço, não alguma sigla
+    // que apareça por acaso antes, tipo em código de atividade)
+    const matches = [...text.matchAll(new RegExp('\\b(' + UF_LIST + ')\\b', 'g'))];
+    if (matches.length) uf = matches[matches.length - 1][1];
+  }
+
+  // "********" no complemento significa "sem complemento" no formulário da Receita — deixamos em branco
+  if (complemento && /^\*+$/.test(complemento)) complemento = '';
+
+  // CEP vem grafado como "08.022-000" — tira o ponto entre os dois primeiros dígitos
+  if (cep) cep = cep.replace(/^(\d{2})\.(\d{3})/, '$1$2');
+
+  return {
+    numeroInscricao, nomeEmpresarial, dataAbertura, atividadePrincipal,
+    logradouro, numero, complemento, cep, bairro, municipio, uf
+  };
+}
+
+function renderResultsCnpj(d, rawText){
+  const campo = (label, valor) => `
+    <dt>${label}</dt>
+    <dd class="${valor ? '' : 'missing'}">${valor ? escapeHtml(valor) : 'não localizado'}</dd>
+  `;
+  // complemento pode ser propositalmente vazio (não é "não localizado")
+  const campoComplemento = `
+    <dt>Complemento</dt>
+    <dd class="${d.complemento === null ? 'missing' : ''}">${d.complemento === null ? 'não localizado' : (d.complemento || '<span style="color:#9AA3AC;">(sem complemento)</span>')}</dd>
+  `;
+
+  const html = `
+    <div class="socio-card">
+      <h3>${escapeHtml(d.nomeEmpresarial || 'Empresa não identificada')}</h3>
+      <dl class="field-grid">
+        ${campo('Nº de inscrição', d.numeroInscricao)}
+        ${campo('Data de abertura', d.dataAbertura)}
+        ${campo('Atividade principal', d.atividadePrincipal)}
+        ${campo('Logradouro', d.logradouro)}
+        ${campo('Número', d.numero)}
+        ${campoComplemento}
+        ${campo('CEP', d.cep)}
+        ${campo('Bairro/Distrito', d.bairro)}
+        ${campo('Município', d.municipio)}
+        ${campo('UF', d.uf)}
+      </dl>
+    </div>
+    <div class="disclaimer">
+      Extração automática por leitura de texto do PDF — sempre confira os dados contra o documento original antes de usar oficialmente.
+    </div>
+    ${rawTextBlock(rawText)}
+  `;
+  resultsCnpjEl.innerHTML = html;
 }
 </script>
 
