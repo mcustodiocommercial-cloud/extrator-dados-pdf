@@ -476,25 +476,28 @@ const apiKeyCancelBtn = document.getElementById('apiKeyCancelBtn');
 const apiKeyClearBtn = document.getElementById('apiKeyClearBtn');
 
 // ====================================================================
-// CHAVE DE API PADRÃO (opcional)
-// Se você quiser que o site já venha com a chave preenchida (sem precisar
-// clicar em "🔑 Chave de API" e colar toda vez que abrir num navegador novo),
-// cole sua chave do Google AI Studio aqui embaixo, entre as aspas.
-//
-// IMPORTANTE: como esse arquivo vai ficar público no GitHub Pages, qualquer
-// pessoa que abrir "ver código-fonte" da página vai conseguir ver essa chave.
-// Como é uma chave GRATUITA (sem cartão de crédito, sem cobrança), o pior que
-// pode acontecer é alguém gastar sua cota diária — não vai gerar nenhuma
-// fatura. Mesmo assim, gere uma chave NOVA pra colar aqui (revogue a antiga
-// se ela já apareceu em algum print ou mensagem antes) em aistudio.google.com/apikey
+// PROXY DA EQUIPE (recomendado) — Cloudflare Worker
+// Depois de publicar o worker.js (veja instruções no próprio arquivo), cole
+// aqui a URL dele. Com isso, NINGUÉM da equipe precisa configurar chave — a
+// IA já funciona sozinha pra todo mundo que abrir o site, com segurança,
+// porque a chave real fica só no Worker, nunca no navegador de ninguém.
 // ====================================================================
-const DEFAULT_GEMINI_API_KEY = 'AQ.Ab8RN6L5D2e2hMxx4eI5maSdvGMgZnM1G8glzqPNXB-SLYhQxg'; // <- cole sua chave nova aqui dentro das aspas
+const WORKER_URL = 'https://winter-salad-78e6.mcustodio-commercial.workers.dev'; // proxy do time (chave fica em segredo no Cloudflare)
+
+// ====================================================================
+// CHAVE DE API PESSOAL (modo alternativo, só usado se WORKER_URL acima
+// estiver vazio) — cada pessoa pode colar a própria chave gratuita clicando
+// em "🔑 Chave de API" no site. Serve como plano B, ou pra testes sozinho.
+// ====================================================================
+const DEFAULT_GEMINI_API_KEY = ''; // <- cole sua chave aqui dentro das aspas (opcional)
 
 const GEMINI_KEY_STORAGE = 'extrator_socios_gemini_key';
 
 function getApiKey(){ return localStorage.getItem(GEMINI_KEY_STORAGE) || DEFAULT_GEMINI_API_KEY || ''; }
+function aiAvailable(){ return !!WORKER_URL || !!getApiKey(); }
 function setApiKeyUiState(){
-  apiKeyBtn.classList.toggle('set', !!getApiKey());
+  apiKeyBtn.classList.toggle('set', aiAvailable());
+  if (WORKER_URL) apiKeyBtn.title = 'IA já configurada pelo proxy da equipe — clique só se quiser usar uma chave pessoal';
 }
 setApiKeyUiState();
 
@@ -577,7 +580,7 @@ async function handleFile(file){
     lastExtractedText = fullText;
     let socios = parseSocios(fullText);
 
-    if (getApiKey()){
+    if (aiAvailable()){
       // Se já existe uma chave salva, deixamos a IA como fonte principal — ela lida
       // muito melhor com a variação de formato entre contratos do que o regex.
       showStatus(socios.length ? 'Conferindo com IA…' : 'Leitura automática não encontrou os sócios — tentando com IA…', 'info');
@@ -595,7 +598,7 @@ async function handleFile(file){
     }
 
     renderResults(socios, fullText, 'regex');
-    if (!getApiKey() || socios.length) hideStatus();
+    if (!aiAvailable() || socios.length) hideStatus();
   }catch(err){
     console.error(err);
     showStatus('Não consegui ler esse PDF. Confirme se o arquivo não está corrompido e tente de novo.', 'error');
@@ -655,9 +658,9 @@ async function extractFullText(doc){
 // ---------- Extração via IA (Gemini, gratuito) ----------
 async function extractWithAI(fullText){
   const apiKey = getApiKey();
-  if (!apiKey){
+  if (!WORKER_URL && !apiKey){
     apiKeyModal.classList.add('show');
-    throw new Error('Configure sua chave de API primeiro.');
+    throw new Error('Configure sua chave de API primeiro (ou peça pro administrador configurar o Worker do time — veja worker.js).');
   }
 
   const schema = {
@@ -705,20 +708,30 @@ ${fullText.slice(0, 60000)}
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   async function callModel(model){
+    const payload = {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+        temperature: 0
+      }
+    };
+    if (WORKER_URL){
+      // Passa pelo proxy da equipe — a chave real fica só no Worker, nunca aqui.
+      return fetch(WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, payload })
+      });
+    }
+    // Modo alternativo: chama o Google direto com a chave pessoal do usuário.
     return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey
       },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: schema,
-          temperature: 0
-        }
-      })
+      body: JSON.stringify(payload)
     });
   }
 
