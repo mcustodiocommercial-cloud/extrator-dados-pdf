@@ -116,7 +116,7 @@
     background:#FBFAF8;
   }
   /* Upload area */
-  #dropzone{
+  #dropzone, #dropzoneCnpj{
     margin:18px;
     border:2px dashed var(--line);
     border-radius:8px;
@@ -125,42 +125,42 @@
     cursor:pointer;
     transition: border-color .15s, background .15s;
   }
-  #dropzone:hover, #dropzone.drag{
+  #dropzone:hover, #dropzone.drag, #dropzoneCnpj:hover, #dropzoneCnpj.drag{
     border-color: var(--navy);
     background: #F1F5F8;
   }
-  #dropzone svg{ width:34px; height:34px; color:var(--ink-soft); margin-bottom:8px;}
-  #dropzone .primary{ font-size:14.5px; font-weight:600; color:var(--ink); }
-  #dropzone .secondary{ font-size:12px; color:var(--ink-soft); margin-top:4px; }
+  #dropzone svg, #dropzoneCnpj svg{ width:34px; height:34px; color:var(--ink-soft); margin-bottom:8px;}
+  #dropzone .primary, #dropzoneCnpj .primary{ font-size:14.5px; font-weight:600; color:var(--ink); }
+  #dropzone .secondary, #dropzoneCnpj .secondary{ font-size:12px; color:var(--ink-soft); margin-top:4px; }
   #fileInput{ display:none; }
 
-  #fileMeta{
+  #fileMeta, #fileMetaCnpj{
     margin: 0 18px 18px;
     font-size:12.5px;
     color: var(--ink-soft);
     display:none;
   }
-  #fileMeta.show{ display:block; }
-  #fileMeta strong{ color: var(--ink); }
+  #fileMeta.show, #fileMetaCnpj.show{ display:block; }
+  #fileMeta strong, #fileMetaCnpj strong{ color: var(--ink); }
 
-  #status{
+  #status, #statusCnpj{
     margin: 0 18px 14px;
     font-size:13px;
     display:none;
     padding:10px 12px;
     border-radius:6px;
   }
-  #status.show{ display:block; }
-  #status.info{ background:#EEF3F7; color:var(--navy-dark); }
-  #status.error{ background:#F7EAEA; color:var(--danger); }
+  #status.show, #statusCnpj.show{ display:block; }
+  #status.info, #statusCnpj.info{ background:#EEF3F7; color:var(--navy-dark); }
+  #status.error, #statusCnpj.error{ background:#F7EAEA; color:var(--danger); }
 
   /* PDF preview */
-  #pdfViewer{
+  #pdfViewer, #pdfViewerCnpj{
     padding: 0 18px 18px;
     max-height:600px;
     overflow:auto;
   }
-  #pdfViewer canvas{
+  #pdfViewer canvas, #pdfViewerCnpj canvas{
     width:100%;
     display:block;
     border:1px solid var(--line);
@@ -625,10 +625,10 @@ nextBtn.addEventListener('click', () => { if(pdfDoc && currentPage<pdfDoc.numPag
 // Usado quando o PDF é uma digitalização/foto sem texto real: renderiza as
 // primeiras páginas como imagem (JPEG) pra mandar pro Gemini "ler" visualmente,
 // já que não há texto nenhum pra extrair via pdf.js nesse caso.
-async function renderPagesAsImageParts(numPages){
+async function renderPagesAsImageParts(doc, numPages){
   const parts = [];
   for (let i = 1; i <= numPages; i++){
-    const page = await pdfDoc.getPage(i);
+    const page = await doc.getPage(i);
     const viewport = page.getViewport({ scale: 1.5 });
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
@@ -674,53 +674,25 @@ async function extractFullText(doc){
 }
 
 // ---------- Extração via IA (Gemini, gratuito) ----------
-async function extractWithAI(fullText){
+
+// Monta as partes (texto OU imagens das páginas, se o PDF for uma digitalização
+// sem texto real) e chama o Gemini, devolvendo o objeto JSON já validado contra
+// o schema pedido. Usada tanto pra sócios quanto pro Cartão CNPJ.
+async function callGeminiJSON(instructions, fullText, schema, docRef){
   const apiKey = getApiKey();
   if (!WORKER_URL && !apiKey){
     apiKeyModal.classList.add('show');
     throw new Error('Configure sua chave de API primeiro (ou peça pro administrador configurar o Worker do time — veja worker.js).');
   }
 
-  const schema = {
-    type: 'object',
-    properties: {
-      socios: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            nome: { type: 'string' },
-            endereco: { type: 'string' },
-            cpf: { type: 'string' },
-            rg: { type: 'string' },
-            quotas: { type: 'string' },
-            percentual: { type: 'string' }
-          },
-          required: ['nome']
-        }
-      }
-    },
-    required: ['socios']
-  };
-
-  const instructions = `Você vai identificar APENAS os sócios/quotistas de uma empresa a partir de um Contrato Social (ou Certidão de Inteiro Teor da JUCESP) em português — não inclua contadores, procuradores, secretários da junta comercial, julgadores ou testemunhas.
-
-Para cada sócio, extraia (deixe null quando a informação não existir, não invente nada):
-- nome: nome completo do sócio
-- endereco: endereço completo (logradouro, número, bairro, cidade, UF, CEP)
-- cpf: CPF do sócio
-- rg: RG do sócio
-- quotas: número de quotas que ele detém
-- percentual: percentual de participação na sociedade (ex: "50%")`;
-
   // Se o PDF extraiu pouco ou nenhum texto, ele provavelmente é uma digitalização/foto
-  // sem camada de texto real (comum em contratos escaneados). Nesse caso, em vez de
-  // mandar texto (que viria vazio), mandamos as PÁGINAS COMO IMAGEM pro Gemini "ler"
-  // visualmente — o modelo suporta isso nativamente (é multimodal).
+  // sem camada de texto real. Nesse caso, em vez de mandar texto (que viria vazio),
+  // mandamos as PÁGINAS COMO IMAGEM pro Gemini "ler" visualmente — o modelo suporta
+  // isso nativamente (é multimodal).
   const isScanned = fullText.replace(/\s/g,'').length < 200;
   let parts;
-  if (isScanned && typeof pdfDoc !== 'undefined' && pdfDoc){
-    const imageParts = await renderPagesAsImageParts(Math.min(pdfDoc.numPages, 6));
+  if (isScanned && docRef){
+    const imageParts = await renderPagesAsImageParts(docRef, Math.min(docRef.numPages, 6));
     parts = [
       ...imageParts,
       { text: instructions + '\n\nEsse PDF é uma digitalização/foto (sem texto selecionável) — leia o conteúdo diretamente nas imagens das páginas acima.' }
@@ -808,17 +780,88 @@ Para cada sócio, extraia (deixe null quando a informação não existir, não i
   }
 
   const textOut = data.candidates[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-  let parsed;
   try{
-    parsed = JSON.parse(textOut);
+    return JSON.parse(textOut);
   }catch(e){
     throw new Error('A IA respondeu em um formato inesperado: ' + textOut.slice(0,150));
   }
+}
+
+async function extractWithAI(fullText){
+  const schema = {
+    type: 'object',
+    properties: {
+      socios: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            nome: { type: 'string' },
+            endereco: { type: 'string' },
+            cpf: { type: 'string' },
+            rg: { type: 'string' },
+            quotas: { type: 'string' },
+            percentual: { type: 'string' }
+          },
+          required: ['nome']
+        }
+      }
+    },
+    required: ['socios']
+  };
+
+  const instructions = `Você vai identificar APENAS os sócios/quotistas de uma empresa a partir de um Contrato Social (ou Certidão de Inteiro Teor da JUCESP) em português — não inclua contadores, procuradores, secretários da junta comercial, julgadores ou testemunhas.
+
+Para cada sócio, extraia (deixe null quando a informação não existir, não invente nada):
+- nome: nome completo do sócio
+- endereco: endereço completo (logradouro, número, bairro, cidade, UF, CEP)
+- cpf: CPF do sócio
+- rg: RG do sócio
+- quotas: número de quotas que ele detém
+- percentual: percentual de participação na sociedade (ex: "50%")`;
+
+  const parsed = await callGeminiJSON(instructions, fullText, schema, typeof pdfDoc !== 'undefined' ? pdfDoc : null);
   return (parsed.socios || []).filter(s => s.nome);
 }
+
+async function extractCnpjWithAI(fullText){
+  const schema = {
+    type: 'object',
+    properties: {
+      numeroInscricao: { type: 'string' },
+      nomeEmpresarial: { type: 'string' },
+      dataAbertura: { type: 'string' },
+      atividadePrincipal: { type: 'string' },
+      logradouro: { type: 'string' },
+      numero: { type: 'string' },
+      complemento: { type: 'string' },
+      cep: { type: 'string' },
+      bairro: { type: 'string' },
+      municipio: { type: 'string' },
+      uf: { type: 'string' }
+    }
+  };
+
+  const instructions = `Você vai ler um "Comprovante de Inscrição e de Situação Cadastral" (Cartão CNPJ da Receita Federal) em português e extrair estes campos exatos (deixe null quando a informação não existir, não invente nada):
+- numeroInscricao: número de inscrição do CNPJ, no formato XX.XXX.XXX/XXXX-XX
+- nomeEmpresarial: nome empresarial completo
+- dataAbertura: data de abertura, no formato DD/MM/AAAA
+- atividadePrincipal: código e descrição da atividade econômica principal (ex: "45.11-1-02 - Comércio a varejo de automóveis...")
+- logradouro: nome da rua/avenida do endereço (sem o número)
+- numero: número do endereço
+- complemento: complemento do endereço — se o campo estiver preenchido só com asteriscos (********) ou vazio, retorne string vazia "", não null
+- cep: CEP SEM o ponto entre os dois primeiros dígitos (ex: "08022-000", não "08.022-000")
+- bairro: bairro/distrito
+- municipio: município
+- uf: sigla do estado (2 letras)`;
+
+  return callGeminiJSON(instructions, fullText, schema, typeof pdfDocCnpj !== 'undefined' ? pdfDocCnpj : null);
+}
+
 function cleanSpaces(s){
   return s.replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
 }
+
 
 function parseSocios(rawText){
   // Mantemos as quebras de linha reais (vindas da posição no PDF) porque a âncora
@@ -1061,8 +1104,28 @@ async function handleFileCnpj(file){
 
     const fullText = await extractFullText(pdfDocCnpj); // mesma função usada no contrato social
     const dados = parseCNPJ(fullText);
-    renderResultsCnpj(dados, fullText);
-    hideStatusCnpj();
+
+    if (aiAvailable()){
+      // Mesma lógica do contrato social: se a IA está disponível (Worker do time ou
+      // chave pessoal), ela vira a fonte principal — lida melhor com layouts de
+      // tabela diferentes do que o regex, que assume rótulo e valor em linhas
+      // adjacentes (nem todo PDF do Cartão CNPJ organiza o texto assim).
+      showStatusCnpj('Conferindo com IA…', 'info');
+      resultsCnpjEl.innerHTML = '<div class="empty-state">🤖 Lendo com IA…</div>';
+      try{
+        const dadosIA = await extractCnpjWithAI(fullText);
+        renderResultsCnpj(dadosIA, fullText, 'ia');
+        hideStatusCnpj();
+        return;
+      }catch(err){
+        console.error(err);
+        showStatusCnpj('A IA não conseguiu processar: ' + err.message, 'error');
+        // segue abaixo e mostra pelo menos o resultado da leitura automática
+      }
+    }
+
+    renderResultsCnpj(dados, fullText, 'regex');
+    if (!aiAvailable()) hideStatusCnpj();
   }catch(err){
     console.error(err);
     showStatusCnpj('Não consegui ler esse PDF. Confirme se o arquivo não está corrompido e tente de novo.', 'error');
@@ -1167,7 +1230,7 @@ function parseCNPJ(rawText){
   };
 }
 
-function renderResultsCnpj(d, rawText){
+function renderResultsCnpj(d, rawText, source){
   const campo = (label, valor) => `
     <dt>${label}</dt>
     <dd class="${valor ? '' : 'missing'}">${valor ? escapeHtml(valor) : 'não localizado'}</dd>
@@ -1175,10 +1238,21 @@ function renderResultsCnpj(d, rawText){
   // complemento pode ser propositalmente vazio (não é "não localizado")
   const campoComplemento = `
     <dt>Complemento</dt>
-    <dd class="${d.complemento === null ? 'missing' : ''}">${d.complemento === null ? 'não localizado' : (d.complemento || '<span style="color:#9AA3AC;">(sem complemento)</span>')}</dd>
+    <dd class="${(d.complemento === null || d.complemento === undefined) ? 'missing' : ''}">${(d.complemento === null || d.complemento === undefined) ? 'não localizado' : (d.complemento || '<span style="color:#9AA3AC;">(sem complemento)</span>')}</dd>
   `;
 
+  const banner = source === 'ia'
+    ? `<div class="ai-banner">
+         <p>Resultado gerado por IA (Gemini). Sempre confira contra o PDF antes de usar oficialmente.</p>
+         <button class="btn-ai btn-ai-ghost" id="tryRegexBtnCnpj">↺ Voltar pra leitura automática</button>
+       </div>`
+    : `<div class="ai-banner">
+         <p>${aiAvailable() ? 'Conferido tudo? Se algum campo ficou como "não localizado", a IA costuma pegar layouts de tabela diferentes.' : 'Leitura automática por padrão de texto do PDF.'}</p>
+         ${aiAvailable() ? `<button class="btn-ai" id="tryAiBtnCnpj">🤖 Tentar de novo com IA</button>` : ''}
+       </div>`;
+
   const html = `
+    ${banner}
     <div class="socio-card">
       <h3>${escapeHtml(d.nomeEmpresarial || 'Empresa não identificada')}</h3>
       <dl class="field-grid">
@@ -1195,11 +1269,33 @@ function renderResultsCnpj(d, rawText){
       </dl>
     </div>
     <div class="disclaimer">
-      Extração automática por leitura de texto do PDF — sempre confira os dados contra o documento original antes de usar oficialmente.
+      ${source === 'ia' ? 'Extração via IA (Gemini)' : 'Extração automática por leitura de texto do PDF'} — sempre confira os dados contra o documento original antes de usar oficialmente.
     </div>
     ${rawTextBlock(rawText)}
   `;
   resultsCnpjEl.innerHTML = html;
+
+  const tryAiBtnCnpj = document.getElementById('tryAiBtnCnpj');
+  if (tryAiBtnCnpj){
+    tryAiBtnCnpj.addEventListener('click', async () => {
+      tryAiBtnCnpj.disabled = true;
+      tryAiBtnCnpj.textContent = '🤖 Lendo com IA…';
+      try{
+        const dadosIA = await extractCnpjWithAI(rawText);
+        renderResultsCnpj(dadosIA, rawText, 'ia');
+      }catch(err){
+        tryAiBtnCnpj.disabled = false;
+        tryAiBtnCnpj.textContent = '🤖 Tentar de novo com IA';
+        showStatusCnpj(err.message, 'error');
+      }
+    });
+  }
+  const tryRegexBtnCnpj = document.getElementById('tryRegexBtnCnpj');
+  if (tryRegexBtnCnpj){
+    tryRegexBtnCnpj.addEventListener('click', () => {
+      renderResultsCnpj(parseCNPJ(rawText), rawText, 'regex');
+    });
+  }
 }
 </script>
 
