@@ -622,6 +622,24 @@ async function renderPage(num){
 prevBtn.addEventListener('click', () => { if(currentPage>1){ currentPage--; renderPage(currentPage);} });
 nextBtn.addEventListener('click', () => { if(pdfDoc && currentPage<pdfDoc.numPages){ currentPage++; renderPage(currentPage);} });
 
+// Usado quando o PDF é uma digitalização/foto sem texto real: renderiza as
+// primeiras páginas como imagem (JPEG) pra mandar pro Gemini "ler" visualmente,
+// já que não há texto nenhum pra extrair via pdf.js nesse caso.
+async function renderPagesAsImageParts(numPages){
+  const parts = [];
+  for (let i = 1; i <= numPages; i++){
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: base64 } });
+  }
+  return parts;
+}
+
 async function extractFullText(doc){
   // Reconstrói linhas reais da página usando a posição Y de cada fragmento de texto,
   // em vez de simplesmente concatenar tudo — isso é essencial porque as cláusulas de
@@ -685,20 +703,31 @@ async function extractWithAI(fullText){
     required: ['socios']
   };
 
-  const prompt = `Você vai ler o texto extraído de um Contrato Social (ou Certidão de Inteiro Teor da JUCESP) em português e identificar APENAS os sócios/quotistas da empresa — não inclua contadores, procuradores, secretários da junta comercial, julgadores ou testemunhas.
+  const instructions = `Você vai identificar APENAS os sócios/quotistas de uma empresa a partir de um Contrato Social (ou Certidão de Inteiro Teor da JUCESP) em português — não inclua contadores, procuradores, secretários da junta comercial, julgadores ou testemunhas.
 
-Para cada sócio, extraia (deixe null quando a informação não existir no texto, não invente nada):
+Para cada sócio, extraia (deixe null quando a informação não existir, não invente nada):
 - nome: nome completo do sócio
 - endereco: endereço completo (logradouro, número, bairro, cidade, UF, CEP)
 - cpf: CPF do sócio
 - rg: RG do sócio
 - quotas: número de quotas que ele detém
-- percentual: percentual de participação na sociedade (ex: "50%")
+- percentual: percentual de participação na sociedade (ex: "50%")`;
 
-Texto do documento:
-"""
-${fullText.slice(0, 60000)}
-"""`;
+  // Se o PDF extraiu pouco ou nenhum texto, ele provavelmente é uma digitalização/foto
+  // sem camada de texto real (comum em contratos escaneados). Nesse caso, em vez de
+  // mandar texto (que viria vazio), mandamos as PÁGINAS COMO IMAGEM pro Gemini "ler"
+  // visualmente — o modelo suporta isso nativamente (é multimodal).
+  const isScanned = fullText.replace(/\s/g,'').length < 200;
+  let parts;
+  if (isScanned && typeof pdfDoc !== 'undefined' && pdfDoc){
+    const imageParts = await renderPagesAsImageParts(Math.min(pdfDoc.numPages, 6));
+    parts = [
+      ...imageParts,
+      { text: instructions + '\n\nEsse PDF é uma digitalização/foto (sem texto selecionável) — leia o conteúdo diretamente nas imagens das páginas acima.' }
+    ];
+  } else {
+    parts = [{ text: instructions + `\n\nTexto do documento:\n"""\n${fullText.slice(0, 60000)}\n"""` }];
+  }
 
   // O Google troca os nomes/versões dos modelos gratuitos com frequência — se um
   // não existir mais (404) tentamos o próximo da lista. Colocamos o modelo mais
@@ -709,7 +738,7 @@ ${fullText.slice(0, 60000)}
 
   async function callModel(model){
     const payload = {
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts }],
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: schema,
@@ -893,11 +922,13 @@ function renderResults(socios, rawText, source){
          <button class="btn-ai btn-ai-ghost" id="tryRegexBtn">↺ Voltar pra leitura automática</button>
        </div>`;
 
-  if (!socios.length && source === 'regex'){
+  if (!socios.length){
     html = `
       ${banner}
       <div class="empty-state" style="padding:30px 20px;">
-        Confira o texto bruto extraído abaixo para ajustar manualmente, ou tente o botão de IA acima.
+        ${source === 'ia'
+          ? 'A IA processou o documento mas não encontrou sócios nele. Pode ser um PDF com qualidade de imagem muito baixa, ou o documento pode não conter essa informação nas páginas lidas.'
+          : 'Confira o texto bruto extraído abaixo para ajustar manualmente, ou tente o botão de IA acima.'}
       </div>
       ${rawTextBlock(rawText)}
     `;
